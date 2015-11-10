@@ -7,7 +7,7 @@ PATCH_DIR=$(CURDIR)/patches
 define apply_patch
 mkdir -p $(CURDIR)/$(2);
 cp -r ${GO_SRC}/$(1)/* $(CURDIR)/$(2)/;
-git apply $(PATCH_DIR)/*;
+git apply $(PATCH_DIR)/$(3)/*;
 endef
 
 download_go_src:
