@@ -16,6 +16,8 @@ download_go_src:
 run_patch: download_go_src
 	@rm -rf canonical/json
 	$(call apply_patch,encoding/json,canonical/json,json)
+	@rm -rf canonical/text/template
+	$(call apply_patch,text/template,canonical/text/template,text/template)
 
 update: run_patch clean
 
