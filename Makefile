@@ -7,7 +7,7 @@ PATCH_DIR=$(CURDIR)/patches
 define apply_patch
 mkdir -p $(CURDIR)/$(2);
 cp -r ${GO_SRC}/$(1)/* $(CURDIR)/$(2)/;
-git apply $(PATCH_DIR)/*;
+git apply $(PATCH_DIR)/$(3)/*;
 endef
 
 download_go_src:
@@ -16,6 +16,8 @@ download_go_src:
 run_patch: download_go_src
 	@rm -rf canonical/json
 	$(call apply_patch,encoding/json,canonical/json,json)
+	@rm -rf canonical/text/template
+	$(call apply_patch,text/template,canonical/text/template,text/template)
 
 update: run_patch clean
 

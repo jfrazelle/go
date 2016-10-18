@@ -1,0 +1,86 @@
+From f23a327141deaa84d3bffc5d7941bc0de3de6ff8 Mon Sep 17 00:00:00 2001
+From: David Calavera <david.calavera@gmail.com>
+Date: Tue, 10 Nov 2015 13:28:20 -0500
+Subject: [PATCH] Parse template field names from the struct tag "template".
+
+This is very inneficient way to parse fields in a template.
+Unfortunately, it's very useful to keep backwards compatibility
+between different versions of the same struct.
+
+Signed-off-by: David Calavera <david.calavera@gmail.com>
+---
+ canonical/text/template/exec.go      | 21 ++++++++++++++++++++-
+ canonical/text/template/exec_test.go | 24 ++++++++++++++++++++++++
+ 2 files changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/canonical/text/template/exec.go b/canonical/text/template/exec.go
+index daba788..eda0f8b 100644
+--- a/canonical/text/template/exec.go
++++ b/canonical/text/template/exec.go
+@@ -501,7 +501,12 @@ func (s *state) evalField(dot reflect.Value, fieldName string, node parse.Node,
+ 	}
+ 	switch receiver.Kind() {
+ 	case reflect.Struct:
+-		tField, ok := receiver.Type().FieldByName(fieldName)
++		rType := receiver.Type()
++		tField, ok := rType.FieldByName(fieldName)
++		if !ok {
++			tField, ok = fieldByTagName(rType, fieldName)
++		}
++
+ 		if ok {
+ 			field := receiver.FieldByIndex(tField.Index)
+ 			if tField.PkgPath != "" { // field is unexported
+@@ -877,3 +882,17 @@ func sortKeys(v []reflect.Value) []reflect.Value {
+ 	}
+ 	return v
+ }
++
++// fieldByTagName tries to find a field by the name in the `template` tag.
++func fieldByTagName(v reflect.Type, name string) (reflect.StructField, bool) {
++	var field reflect.StructField
++	for i := 0; i < v.NumField(); i++ {
++		field = v.Field(i)
++		if tag := field.Tag.Get("template"); tag != "" {
++			if tagName := strings.Split(tag, ",")[0]; tagName == name {
++				return field, true
++			}
++		}
++	}
++	return field, false
++}
+diff --git a/canonical/text/template/exec_test.go b/canonical/text/template/exec_test.go
+index ba0e434..c8b486c 100644
+--- a/canonical/text/template/exec_test.go
++++ b/canonical/text/template/exec_test.go
+@@ -1141,3 +1141,27 @@ func TestUnterminatedStringError(t *testing.T) {
+ 		t.Fatalf("unexpected error: %s", str)
+ 	}
+ }
++
++func TestFielByTagName(t *testing.T) {
++	type s struct {
++		ID string `template:"id"`
++	}
++
++	tmpl, err := New("t1").Parse("{{.id}}")
++	if err != nil {
++		t.Fatal(err)
++	}
++	data := s{"STRUCT_ID"}
++
++	var b bytes.Buffer
++	err = tmpl.Execute(&b, data)
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	want := "STRUCT_ID"
++	got := b.String()
++	if got != want {
++		t.Errorf("got %q; expected %q", got, want)
++	}
++}
+-- 
+1.9.1
+
