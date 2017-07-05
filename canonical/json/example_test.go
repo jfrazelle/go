@@ -1,4 +1,4 @@
-// Copyright 2011 The Go Authors.  All rights reserved.
+// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -143,10 +143,9 @@ func ExampleDecoder_Decode_stream() {
 	}
 	fmt.Printf("%T: %v\n", t, t)
 
-	var m Message
 	// while the array contains values
 	for dec.More() {
-
+		var m Message
 		// decode an array value (Message)
 		err := dec.Decode(&m)
 		if err != nil {
@@ -175,7 +174,7 @@ func ExampleDecoder_Decode_stream() {
 }
 
 // This example uses RawMessage to delay parsing part of a JSON message.
-func ExampleRawMessage() {
+func ExampleRawMessage_unmarshal() {
 	type Color struct {
 		Space string
 		Point json.RawMessage // delay parsing until we know the color space
@@ -218,6 +217,30 @@ func ExampleRawMessage() {
 	// Output:
 	// YCbCr &{255 0 -10}
 	// RGB &{98 218 255}
+}
+
+// This example uses RawMessage to use a precomputed JSON during marshal.
+func ExampleRawMessage_marshal() {
+	h := json.RawMessage(`{"precomputed": true}`)
+
+	c := struct {
+		Header *json.RawMessage `json:"header"`
+		Body   string           `json:"body"`
+	}{Header: &h, Body: "Hello Gophers!"}
+
+	b, err := json.MarshalIndent(&c, "", "\t")
+	if err != nil {
+		fmt.Println("error:", err)
+	}
+	os.Stdout.Write(b)
+
+	// Output:
+	// {
+	// 	"header": {
+	// 		"precomputed": true
+	// 	},
+	// 	"body": "Hello Gophers!"
+	// }
 }
 
 func ExampleIndent() {

@@ -1,4 +1,4 @@
-GO_VERSION=1.6
+GO_VERSION=1.8.3
 GO_SRC=/tmp/go/src
 PATCH_DIR=$(CURDIR)/patches
 

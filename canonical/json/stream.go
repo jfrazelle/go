@@ -1,4 +1,4 @@
-// Copyright 2010 The Go Authors.  All rights reserved.
+// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -10,7 +10,7 @@ import (
 	"io"
 )
 
-// A Decoder reads and decodes JSON objects from an input stream.
+// A Decoder reads and decodes JSON values from an input stream.
 type Decoder struct {
 	r     io.Reader
 	buf   []byte
@@ -148,7 +148,7 @@ func (dec *Decoder) refill() error {
 		dec.buf = newBuf
 	}
 
-	// Read.  Delay error for next iteration (after scan).
+	// Read. Delay error for next iteration (after scan).
 	n, err := dec.r.Read(dec.buf[len(dec.buf):cap(dec.buf)])
 	dec.buf = dec.buf[0 : len(dec.buf)+n]
 
@@ -164,21 +164,21 @@ func nonSpace(b []byte) bool {
 	return false
 }
 
-// An Encoder writes JSON objects to an output stream.
+// An Encoder writes JSON values to an output stream.
 type Encoder struct {
-	w         io.Writer
-	err       error
-	canonical bool
+	w          io.Writer
+	err        error
+	escapeHTML bool
+
+	indentBuf    *bytes.Buffer
+	indentPrefix string
+	indentValue  string
 }
 
 // NewEncoder returns a new encoder that writes to w.
 func NewEncoder(w io.Writer) *Encoder {
-	return &Encoder{w: w}
+	return &Encoder{w: w, escapeHTML: true}
 }
-
-// Canonical causes the encoder to switch to Canonical JSON mode.
-// Read more at: http://wiki.laptop.org/go/Canonical_JSON
-func (enc *Encoder) Canonical() { enc.canonical = true }
 
 // Encode writes the JSON encoding of v to the stream,
 // followed by a newline character.
@@ -189,37 +189,69 @@ func (enc *Encoder) Encode(v interface{}) error {
 	if enc.err != nil {
 		return enc.err
 	}
-	e := newEncodeState(enc.canonical)
-	err := e.marshal(v)
+	e := newEncodeState()
+	err := e.marshal(v, encOpts{escapeHTML: enc.escapeHTML})
 	if err != nil {
 		return err
 	}
 
-	if !enc.canonical {
-		// Terminate each value with a newline.
-		// This makes the output look a little nicer
-		// when debugging, and some kind of space
-		// is required if the encoded value was a number,
-		// so that the reader knows there aren't more
-		// digits coming.
-		e.WriteByte('\n')
-	}
+	// Terminate each value with a newline.
+	// This makes the output look a little nicer
+	// when debugging, and some kind of space
+	// is required if the encoded value was a number,
+	// so that the reader knows there aren't more
+	// digits coming.
+	e.WriteByte('\n')
 
-	if _, err = enc.w.Write(e.Bytes()); err != nil {
+	b := e.Bytes()
+	if enc.indentPrefix != "" || enc.indentValue != "" {
+		if enc.indentBuf == nil {
+			enc.indentBuf = new(bytes.Buffer)
+		}
+		enc.indentBuf.Reset()
+		err = Indent(enc.indentBuf, b, enc.indentPrefix, enc.indentValue)
+		if err != nil {
+			return err
+		}
+		b = enc.indentBuf.Bytes()
+	}
+	if _, err = enc.w.Write(b); err != nil {
 		enc.err = err
 	}
 	encodeStatePool.Put(e)
 	return err
 }
 
-// RawMessage is a raw encoded JSON object.
+// SetIndent instructs the encoder to format each subsequent encoded
+// value as if indented by the package-level function Indent(dst, src, prefix, indent).
+// Calling SetIndent("", "") disables indentation.
+func (enc *Encoder) SetIndent(prefix, indent string) {
+	enc.indentPrefix = prefix
+	enc.indentValue = indent
+}
+
+// SetEscapeHTML specifies whether problematic HTML characters
+// should be escaped inside JSON quoted strings.
+// The default behavior is to escape &, <, and > to \u0026, \u003c, and \u003e
+// to avoid certain safety problems that can arise when embedding JSON in HTML.
+//
+// In non-HTML settings where the escaping interferes with the readability
+// of the output, SetEscapeHTML(false) disables this behavior.
+func (enc *Encoder) SetEscapeHTML(on bool) {
+	enc.escapeHTML = on
+}
+
+// RawMessage is a raw encoded JSON value.
 // It implements Marshaler and Unmarshaler and can
 // be used to delay JSON decoding or precompute a JSON encoding.
 type RawMessage []byte
 
-// MarshalJSON returns *m as the JSON encoding of m.
-func (m *RawMessage) MarshalJSON() ([]byte, error) {
-	return *m, nil
+// MarshalJSON returns m as the JSON encoding of m.
+func (m RawMessage) MarshalJSON() ([]byte, error) {
+	if m == nil {
+		return []byte("null"), nil
+	}
+	return m, nil
 }
 
 // UnmarshalJSON sets *m to a copy of data.
