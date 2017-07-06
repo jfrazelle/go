@@ -157,12 +157,7 @@ import (
 // an infinite recursion.
 //
 func Marshal(v interface{}) ([]byte, error) {
-	e := &encodeState{}
-	err := e.marshal(v, encOpts{escapeHTML: true})
-	if err != nil {
-		return nil, err
-	}
-	return e.Bytes(), nil
+	return marshal(v, false)
 }
 
 // MarshalIndent is like Marshal but applies Indent to format the output.
@@ -177,6 +172,21 @@ func MarshalIndent(v interface{}, prefix, indent string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// MarshalCanonical is like Marshal but encodes into Canonical JSON.
+// Read more at: http://wiki.laptop.org/go/Canonical_JSON
+func MarshalCanonical(v interface{}) ([]byte, error) {
+	return marshal(v, true)
+}
+
+func marshal(v interface{}, canonical bool) ([]byte, error) {
+	e := &encodeState{canonical: canonical}
+	err := e.marshal(v, encOpts{escapeHTML: true})
+	if err != nil {
+		return nil, err
+	}
+	return e.Bytes(), nil
 }
 
 // HTMLEscape appends to dst the JSON-encoded src with <, >, &, U+2028 and U+2029
@@ -268,17 +278,19 @@ var hex = "0123456789abcdef"
 type encodeState struct {
 	bytes.Buffer // accumulated output
 	scratch      [64]byte
+	canonical    bool
 }
 
 var encodeStatePool sync.Pool
 
-func newEncodeState() *encodeState {
+func newEncodeState(canonical bool) *encodeState {
 	if v := encodeStatePool.Get(); v != nil {
 		e := v.(*encodeState)
 		e.Reset()
+		e.canonical = canonical
 		return e
 	}
-	return new(encodeState)
+	return &encodeState{canonical: canonical}
 }
 
 func (e *encodeState) marshal(v interface{}, opts encOpts) (err error) {
@@ -320,7 +332,7 @@ func isEmptyValue(v reflect.Value) bool {
 }
 
 func (e *encodeState) reflectValue(v reflect.Value, opts encOpts) {
-	valueEncoder(v)(e, v, opts)
+	e.valueEncoder(v)(e, v, opts)
 }
 
 type encOpts struct {
@@ -337,14 +349,14 @@ var encoderCache struct {
 	m map[reflect.Type]encoderFunc
 }
 
-func valueEncoder(v reflect.Value) encoderFunc {
+func (e *encodeState) valueEncoder(v reflect.Value) encoderFunc {
 	if !v.IsValid() {
 		return invalidValueEncoder
 	}
-	return typeEncoder(v.Type())
+	return e.typeEncoder(v.Type())
 }
 
-func typeEncoder(t reflect.Type) encoderFunc {
+func (e *encodeState) typeEncoder(t reflect.Type) encoderFunc {
 	encoderCache.RLock()
 	f := encoderCache.m[t]
 	encoderCache.RUnlock()
@@ -370,7 +382,7 @@ func typeEncoder(t reflect.Type) encoderFunc {
 
 	// Compute fields without lock.
 	// Might duplicate effort but won't hold other computations back.
-	f = newTypeEncoder(t, true)
+	f = e.newTypeEncoder(t, true)
 	wg.Done()
 	encoderCache.Lock()
 	encoderCache.m[t] = f
@@ -385,13 +397,13 @@ var (
 
 // newTypeEncoder constructs an encoderFunc for a type.
 // The returned encoder only checks CanAddr when allowAddr is true.
-func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
+func (e *encodeState) newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 	if t.Implements(marshalerType) {
 		return marshalerEncoder
 	}
 	if t.Kind() != reflect.Ptr && allowAddr {
 		if reflect.PtrTo(t).Implements(marshalerType) {
-			return newCondAddrEncoder(addrMarshalerEncoder, newTypeEncoder(t, false))
+			return newCondAddrEncoder(addrMarshalerEncoder, e.newTypeEncoder(t, false))
 		}
 	}
 
@@ -400,7 +412,7 @@ func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 	}
 	if t.Kind() != reflect.Ptr && allowAddr {
 		if reflect.PtrTo(t).Implements(textMarshalerType) {
-			return newCondAddrEncoder(addrTextMarshalerEncoder, newTypeEncoder(t, false))
+			return newCondAddrEncoder(addrTextMarshalerEncoder, e.newTypeEncoder(t, false))
 		}
 	}
 
@@ -420,15 +432,15 @@ func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 	case reflect.Interface:
 		return interfaceEncoder
 	case reflect.Struct:
-		return newStructEncoder(t)
+		return e.newStructEncoder(t)
 	case reflect.Map:
-		return newMapEncoder(t)
+		return e.newMapEncoder(t)
 	case reflect.Slice:
-		return newSliceEncoder(t)
+		return e.newSliceEncoder(t)
 	case reflect.Array:
-		return newArrayEncoder(t)
+		return e.newArrayEncoder(t)
 	case reflect.Ptr:
-		return newPtrEncoder(t)
+		return e.newPtrEncoder(t)
 	default:
 		return unsupportedTypeEncoder
 	}
@@ -542,7 +554,7 @@ type floatEncoder int // number of bits
 
 func (bits floatEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	f := v.Float()
-	if math.IsInf(f, 0) || math.IsNaN(f) {
+	if math.IsInf(f, 0) || math.IsNaN(f) || (e.canonical && math.Floor(f) != f) {
 		e.error(&UnsupportedValueError{v, strconv.FormatFloat(f, 'g', -1, int(bits))})
 	}
 
@@ -647,14 +659,14 @@ func (se *structEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	e.WriteByte('}')
 }
 
-func newStructEncoder(t reflect.Type) encoderFunc {
-	fields := cachedTypeFields(t)
+func (e *encodeState) newStructEncoder(t reflect.Type) encoderFunc {
+	fields := cachedTypeFields(t, e.canonical)
 	se := &structEncoder{
 		fields:    fields,
 		fieldEncs: make([]encoderFunc, len(fields)),
 	}
 	for i, f := range fields {
-		se.fieldEncs[i] = typeEncoder(typeByIndex(t, f.index))
+		se.fieldEncs[i] = e.typeEncoder(typeByIndex(t, f.index))
 	}
 	return se.encode
 }
@@ -692,7 +704,7 @@ func (me *mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	e.WriteByte('}')
 }
 
-func newMapEncoder(t reflect.Type) encoderFunc {
+func (e *encodeState) newMapEncoder(t reflect.Type) encoderFunc {
 	switch t.Key().Kind() {
 	case reflect.String,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -702,7 +714,7 @@ func newMapEncoder(t reflect.Type) encoderFunc {
 			return unsupportedTypeEncoder
 		}
 	}
-	me := &mapEncoder{typeEncoder(t.Elem())}
+	me := &mapEncoder{e.typeEncoder(t.Elem())}
 	return me.encode
 }
 
@@ -741,7 +753,7 @@ func (se *sliceEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	se.arrayEnc(e, v, opts)
 }
 
-func newSliceEncoder(t reflect.Type) encoderFunc {
+func (e *encodeState) newSliceEncoder(t reflect.Type) encoderFunc {
 	// Byte slices get special treatment; arrays don't.
 	if t.Elem().Kind() == reflect.Uint8 {
 		p := reflect.PtrTo(t.Elem())
@@ -749,7 +761,7 @@ func newSliceEncoder(t reflect.Type) encoderFunc {
 			return encodeByteSlice
 		}
 	}
-	enc := &sliceEncoder{newArrayEncoder(t)}
+	enc := &sliceEncoder{e.newArrayEncoder(t)}
 	return enc.encode
 }
 
@@ -769,8 +781,8 @@ func (ae *arrayEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	e.WriteByte(']')
 }
 
-func newArrayEncoder(t reflect.Type) encoderFunc {
-	enc := &arrayEncoder{typeEncoder(t.Elem())}
+func (e *encodeState) newArrayEncoder(t reflect.Type) encoderFunc {
+	enc := &arrayEncoder{e.typeEncoder(t.Elem())}
 	return enc.encode
 }
 
@@ -786,8 +798,8 @@ func (pe *ptrEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	pe.elemEnc(e, v.Elem(), opts)
 }
 
-func newPtrEncoder(t reflect.Type) encoderFunc {
-	enc := &ptrEncoder{typeEncoder(t.Elem())}
+func (e *encodeState) newPtrEncoder(t reflect.Type) encoderFunc {
+	enc := &ptrEncoder{e.typeEncoder(t.Elem())}
 	return enc.encode
 }
 
@@ -885,7 +897,7 @@ func (e *encodeState) string(s string, escapeHTML bool) int {
 	start := 0
 	for i := 0; i < len(s); {
 		if b := s[i]; b < utf8.RuneSelf {
-			if htmlSafeSet[b] || (!escapeHTML && safeSet[b]) {
+			if htmlSafeSet[b] || (!escapeHTML && safeSet[b]) || (e.canonical && b != '\\' && b != '"') {
 				i++
 				continue
 			}
@@ -917,6 +929,10 @@ func (e *encodeState) string(s string, escapeHTML bool) int {
 			}
 			i++
 			start = i
+			continue
+		}
+		if e.canonical {
+			i++
 			continue
 		}
 		c, size := utf8.DecodeRuneInString(s[i:])
@@ -962,7 +978,7 @@ func (e *encodeState) stringBytes(s []byte, escapeHTML bool) int {
 	start := 0
 	for i := 0; i < len(s); {
 		if b := s[i]; b < utf8.RuneSelf {
-			if htmlSafeSet[b] || (!escapeHTML && safeSet[b]) {
+			if htmlSafeSet[b] || (!escapeHTML && safeSet[b]) || (e.canonical && b != '\\' && b != '"') {
 				i++
 				continue
 			}
@@ -994,6 +1010,10 @@ func (e *encodeState) stringBytes(s []byte, escapeHTML bool) int {
 			}
 			i++
 			start = i
+			continue
+		}
+		if e.canonical {
+			i++
 			continue
 		}
 		c, size := utf8.DecodeRune(s[i:])
@@ -1213,10 +1233,7 @@ func typeFields(t reflect.Type) []field {
 		}
 	}
 
-	fields = out
-	sort.Sort(byIndex(fields))
-
-	return fields
+	return out
 }
 
 // dominantField looks through the fields, all of which are known to
@@ -1257,15 +1274,28 @@ func dominantField(fields []field) (field, bool) {
 	return fields[0], true
 }
 
+type fields struct {
+	byName  []field
+	byIndex []field
+}
+
 var fieldCache struct {
-	value atomic.Value // map[reflect.Type][]field
+	value atomic.Value // map[reflect.Type][]*fields
 	mu    sync.Mutex   // used only by writers
 }
 
 // cachedTypeFields is like typeFields but uses a cache to avoid repeated work.
-func cachedTypeFields(t reflect.Type) []field {
-	m, _ := fieldCache.value.Load().(map[reflect.Type][]field)
-	f := m[t]
+func cachedTypeFields(t reflect.Type, canonical bool) []field {
+	m, _ := fieldCache.value.Load().(map[reflect.Type]*fields)
+	x := m[t]
+
+	var f []field
+	if x != nil {
+		if canonical {
+			f = x.byName
+		}
+		f = x.byIndex
+	}
 	if f != nil {
 		return f
 	}
@@ -1277,13 +1307,26 @@ func cachedTypeFields(t reflect.Type) []field {
 		f = []field{}
 	}
 
+	if !canonical {
+		sort.Sort(byIndex(f))
+	}
+
 	fieldCache.mu.Lock()
-	m, _ = fieldCache.value.Load().(map[reflect.Type][]field)
-	newM := make(map[reflect.Type][]field, len(m)+1)
+	m, _ = fieldCache.value.Load().(map[reflect.Type]*fields)
+	newM := make(map[reflect.Type]*fields, len(m)+1)
 	for k, v := range m {
 		newM[k] = v
 	}
-	newM[t] = f
+	x = newM[t]
+	if x == nil {
+		x = new(fields)
+	}
+	if canonical {
+		x.byName = f
+	} else {
+		x.byIndex = f
+	}
+	newM[t] = x
 	fieldCache.value.Store(newM)
 	fieldCache.mu.Unlock()
 	return f

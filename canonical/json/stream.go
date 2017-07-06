@@ -173,12 +173,17 @@ type Encoder struct {
 	indentBuf    *bytes.Buffer
 	indentPrefix string
 	indentValue  string
+	canonical    bool
 }
 
 // NewEncoder returns a new encoder that writes to w.
 func NewEncoder(w io.Writer) *Encoder {
 	return &Encoder{w: w, escapeHTML: true}
 }
+
+// Canonical causes the encoder to switch to Canonical JSON mode.
+// Read more at: http://wiki.laptop.org/go/Canonical_JSON
+func (enc *Encoder) Canonical() { enc.canonical = true }
 
 // Encode writes the JSON encoding of v to the stream,
 // followed by a newline character.
@@ -189,19 +194,21 @@ func (enc *Encoder) Encode(v interface{}) error {
 	if enc.err != nil {
 		return enc.err
 	}
-	e := newEncodeState()
+	e := newEncodeState(enc.canonical)
 	err := e.marshal(v, encOpts{escapeHTML: enc.escapeHTML})
 	if err != nil {
 		return err
 	}
 
-	// Terminate each value with a newline.
-	// This makes the output look a little nicer
-	// when debugging, and some kind of space
-	// is required if the encoded value was a number,
-	// so that the reader knows there aren't more
-	// digits coming.
-	e.WriteByte('\n')
+	if !enc.canonical {
+		// Terminate each value with a newline.
+		// This makes the output look a little nicer
+		// when debugging, and some kind of space
+		// is required if the encoded value was a number,
+		// so that the reader knows there aren't more
+		// digits coming.
+		e.WriteByte('\n')
+	}
 
 	b := e.Bytes()
 	if enc.indentPrefix != "" || enc.indentValue != "" {

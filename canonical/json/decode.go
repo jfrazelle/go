@@ -273,6 +273,7 @@ type decodeState struct {
 	}
 	savedError error
 	useNumber  bool
+	canonical  bool
 }
 
 // errPhase is used for errors that should not happen unless
@@ -684,7 +685,7 @@ func (d *decodeState) object(v reflect.Value) {
 			subv = mapElem
 		} else {
 			var f *field
-			fields := cachedTypeFields(v.Type())
+			fields := cachedTypeFields(v.Type(), false)
 			for i := range fields {
 				ff := &fields[i]
 				if bytes.Equal(ff.nameBytes, key) {
