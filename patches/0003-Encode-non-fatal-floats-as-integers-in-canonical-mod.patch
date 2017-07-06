@@ -10,29 +10,54 @@ Signed-off-by: Tonis Tiigi <tonistiigi@gmail.com>
  2 files changed, 21 insertions(+), 1 deletion(-)
 
 diff --git a/canonical/json/encode.go b/canonical/json/encode.go
-index aaa79c2..655f1a6 100644
+index e5d7ea0..636a9d7 100644
 --- a/canonical/json/encode.go
 +++ b/canonical/json/encode.go
-@@ -526,7 +526,13 @@ func (bits floatEncoder) encode(e *encodeState, v reflect.Value, quoted bool) {
- 	if math.IsInf(f, 0) || math.IsNaN(f) || (e.canonical && math.Floor(f) != f) {
- 		e.error(&UnsupportedValueError{v, strconv.FormatFloat(f, 'g', -1, int(bits))})
- 	}
--	b := strconv.AppendFloat(e.scratch[:0], f, 'g', -1, int(bits))
-+
-+	var b []byte
+@@ -564,21 +564,25 @@ func (bits floatEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
+ 	// Like fmt %g, but the exponent cutoffs are different
+ 	// and exponents themselves are not padded to two digits.
+ 	b := e.scratch[:0]
+-	abs := math.Abs(f)
+-	fmt := byte('f')
+-	// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
+-	if abs != 0 {
+-		if bits == 64 && (abs < 1e-6 || abs >= 1e21) || bits == 32 && (float32(abs) < 1e-6 || float32(abs) >= 1e21) {
+-			fmt = 'e'
 +	if e.canonical {
-+		b = strconv.AppendInt(e.scratch[:0], int64(f), 10)
++		b = strconv.AppendInt(b, int64(f), 10)
 +	} else {
-+		b = strconv.AppendFloat(e.scratch[:0], f, 'g', -1, int(bits))
-+	}
- 	if quoted {
- 		e.WriteByte('"')
++		abs := math.Abs(f)
++		fmt := byte('f')
++		// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
++		if abs != 0 {
++			if bits == 64 && (abs < 1e-6 || abs >= 1e21) || bits == 32 && (float32(abs) < 1e-6 || float32(abs) >= 1e21) {
++				fmt = 'e'
++			}
+ 		}
+-	}
+-	b = strconv.AppendFloat(b, f, fmt, -1, int(bits))
+-	if fmt == 'e' {
+-		// clean up e-09 to e-9
+-		n := len(b)
+-		if n >= 4 && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
+-			b[n-2] = b[n-1]
+-			b = b[:n-1]
++		b = strconv.AppendFloat(b, f, fmt, -1, int(bits))
++		if fmt == 'e' {
++			// clean up e-09 to e-9
++			n := len(b)
++			if n >= 4 && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
++				b[n-2] = b[n-1]
++				b = b[:n-1]
++			}
+ 		}
  	}
+
 diff --git a/canonical/json/encode_test.go b/canonical/json/encode_test.go
-index cd41aff..2e42b4e 100644
+index aa8d7fc..ce15882 100644
 --- a/canonical/json/encode_test.go
 +++ b/canonical/json/encode_test.go
-@@ -589,3 +589,17 @@ func TestCanonicalFloatError(t *testing.T) {
+@@ -892,3 +892,17 @@ func TestCanonicalFloatError(t *testing.T) {
  		t.Errorf("want float error, got nil")
  	}
  }
@@ -50,6 +75,5 @@ index cd41aff..2e42b4e 100644
 +		t.Errorf("Marshal(%q) = %#q, want %#q", in, out, expected)
 +	}
 +}
--- 
+--
 2.5.0
-
