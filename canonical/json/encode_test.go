@@ -6,6 +6,7 @@ package json
 
 import (
 	"bytes"
+	normalJson "encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -866,20 +867,39 @@ var encodeCanonicalTests = []struct {
 }
 
 func TestEncodeCanonicalStruct(t *testing.T) {
-	for _, tt := range encodeCanonicalTests {
-		b, err := MarshalCanonical(tt.in)
-		if err != nil {
-			if !tt.expectErr {
-				t.Errorf("MarshalCanonical(%#v) = error(%v), want %s", tt.in, err, tt.out)
+	// First, encode non-canonically in order to populate cache and make sure that canonically succeeds after.
+	// Run twice to make sure that marshalling canonically does not break the caches so that they interfere
+	// with normal marshalling.
+	for i := 0; i < 2; i++ {
+		for _, tt := range encodeCanonicalTests {
+			normal, err := normalJson.Marshal(tt.in)
+			if err != nil {
+				t.Errorf("normalJson.Marshal(%#v) = error(%v)", tt.in, err)
 			}
-			continue
-		} else if tt.expectErr {
-			t.Errorf("MarshalCanonical(%#v) expects an error", tt.in)
-			continue
+			nonCanonical, err := Marshal(tt.in)
+			if err != nil {
+				t.Errorf("Marshal(%#v) = error(%v)", tt.in, err)
+			}
+			if !bytes.Equal(normal, nonCanonical) {
+				t.Errorf("Marshal(%#v) = %q, want %q", tt.in, string(normal), string(nonCanonical))
+			}
 		}
-		out := string(b)
-		if out != tt.out {
-			t.Errorf("MarshalCanonical(%#v) = %q, want %q", tt.in, out, tt.out)
+
+		for _, tt := range encodeCanonicalTests {
+			b, err := MarshalCanonical(tt.in)
+			if err != nil {
+				if !tt.expectErr {
+					t.Errorf("MarshalCanonical(%#v) = error(%v), want %s", tt.in, err, tt.out)
+				}
+				continue
+			} else if tt.expectErr {
+				t.Errorf("MarshalCanonical(%#v) expects an error", tt.in)
+				continue
+			}
+			out := string(b)
+			if out != tt.out {
+				t.Errorf("MarshalCanonical(%#v) = %q, want %q", tt.in, out, tt.out)
+			}
 		}
 	}
 }

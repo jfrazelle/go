@@ -344,9 +344,15 @@ type encOpts struct {
 
 type encoderFunc func(e *encodeState, v reflect.Value, opts encOpts)
 
+// because the encoding functions may be different if canonical is specified
+type cachedEncoder struct {
+	canonical bool
+	cacheType reflect.Type
+}
+
 var encoderCache struct {
 	sync.RWMutex
-	m map[reflect.Type]encoderFunc
+	m map[cachedEncoder]encoderFunc
 }
 
 func (e *encodeState) valueEncoder(v reflect.Value) encoderFunc {
@@ -358,7 +364,7 @@ func (e *encodeState) valueEncoder(v reflect.Value) encoderFunc {
 
 func (e *encodeState) typeEncoder(t reflect.Type) encoderFunc {
 	encoderCache.RLock()
-	f := encoderCache.m[t]
+	f := encoderCache.m[cachedEncoder{canonical: e.canonical, cacheType: t}]
 	encoderCache.RUnlock()
 	if f != nil {
 		return f
@@ -370,11 +376,11 @@ func (e *encodeState) typeEncoder(t reflect.Type) encoderFunc {
 	// func is only used for recursive types.
 	encoderCache.Lock()
 	if encoderCache.m == nil {
-		encoderCache.m = make(map[reflect.Type]encoderFunc)
+		encoderCache.m = make(map[cachedEncoder]encoderFunc)
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	encoderCache.m[t] = func(e *encodeState, v reflect.Value, opts encOpts) {
+	encoderCache.m[cachedEncoder{canonical: e.canonical, cacheType: t}] = func(e *encodeState, v reflect.Value, opts encOpts) {
 		wg.Wait()
 		f(e, v, opts)
 	}
@@ -385,7 +391,7 @@ func (e *encodeState) typeEncoder(t reflect.Type) encoderFunc {
 	f = e.newTypeEncoder(t, true)
 	wg.Done()
 	encoderCache.Lock()
-	encoderCache.m[t] = f
+	encoderCache.m[cachedEncoder{canonical: e.canonical, cacheType: t}] = f
 	encoderCache.Unlock()
 	return f
 }
@@ -1297,8 +1303,9 @@ func cachedTypeFields(t reflect.Type, canonical bool) []field {
 	if x != nil {
 		if canonical {
 			f = x.byName
+		} else {
+			f = x.byIndex
 		}
-		f = x.byIndex
 	}
 	if f != nil {
 		return f
