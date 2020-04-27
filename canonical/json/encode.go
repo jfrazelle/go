@@ -804,7 +804,7 @@ func (e *encodeState) string(s string) (int, error) {
 	start := 0
 	for i := 0; i < len(s); {
 		if b := s[i]; b < utf8.RuneSelf {
-			if b != '\\' && b != '"' {
+			if b != '\\' && b != '"' && b != '\n' && b != '\r' && b != '\t' {
 				if e.canonical || (0x20 <= b && b != '<' && b != '>' && b != '&') {
 					i++
 					continue
@@ -886,7 +886,7 @@ func (e *encodeState) stringBytes(s []byte) (int, error) {
 	start := 0
 	for i := 0; i < len(s); {
 		if b := s[i]; b < utf8.RuneSelf {
-			if b != '\\' && b != '"' {
+			if b != '\\' && b != '"' && b != '\n' && b != '\r' && b != '\t' {
 				if e.canonical || (0x20 <= b && b != '<' && b != '>' && b != '&') {
 					i++
 					continue

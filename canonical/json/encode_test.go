@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"unicode"
 )
@@ -559,10 +560,11 @@ var encodeCanonicalTests = []struct {
 	{&CanonicalTestStruct{F: 1.2}, ``, true},
 	{&CanonicalTestStruct{S: "foo", E: &CanonicalTestStruct{I: 42}}, `{"E":{"E":null,"F":0,"I":42,"S":""},"F":0,"I":0,"S":"foo"}`, false},
 	// only escape \ and " and keep any other character as-is
-	{"\u0090 \t \\ \n \"", "\"\u0090 \t \\\\ \n \\\"\"", false},
+	{"\u0090 \t \\ \n \"", "\"\u0090 \\t \\\\ \\n \\\"\"", false},
 }
 
 func TestEncodeCanonicalStruct(t *testing.T) {
+
 	for _, tt := range encodeCanonicalTests {
 		b, err := MarshalCanonical(tt.in)
 		if err != nil {
@@ -581,6 +583,21 @@ func TestEncodeCanonicalStruct(t *testing.T) {
 	}
 }
 
+func TestRoundTripCanonicalStruct(t *testing.T) {
+	testCR := &CanonicalTestStruct{S: "\u0090 \t \\ \n \""}
+	b, err := MarshalCanonical(testCR)
+	if err != nil {
+		t.Errorf("MarshalCanonical(%#v) = error(%v)", testCR, err)
+	}
+	r := strings.NewReader(string(b))
+	var st CanonicalTestStruct
+	err = NewDecoder(r).Decode(&st)
+	if err != nil {
+		t.Errorf("Decode(%#v) = error(%v)", string(b), err)
+	}
+
+}
+
 func TestCanonicalFloatError(t *testing.T) {
 	input := struct{ A float64 }{1.1}
 
@@ -595,11 +612,11 @@ func TestCanonicalFloatAsInt(t *testing.T) {
 
 	b, err := MarshalCanonical(in)
 	if err != nil {
-		t.Fatalf("Marshal(%q): %v", in, err)
+		t.Fatalf("Marshal(%v): %v", in, err)
 	}
 	out := string(b)
 	expected := `{"A":1234567}`
 	if out != expected {
-		t.Errorf("Marshal(%q) = %#q, want %#q", in, out, expected)
+		t.Errorf("Marshal(%v) = %#q, want %#q", in, out, expected)
 	}
 }
